@@ -59,8 +59,9 @@ import thaumic.tinkerer.common.lib.LibFeatures;
 public class TileTransvectorInterface extends TileTransvector implements ISidedInventory, IEnergyEmitter,IEnergySink,IEnergyConductor,IEnergySource, IFluidHandler, IEnergyHandler, IEnergyReceiver, IAspectContainer, IEssentiaTransport, IPeripheral,IEnergyProvider {
 
     public boolean addedToICEnergyNet = false;
-    private int jarCount = 0;
     private int reservoirCount = 0;
+    private int jarCount = 0;
+    private int thaumatoriumCount = 0;
 
     public static int[] buildSlotsForLinearInventory(IInventory inv) {
         int[] slots = new int[inv.getSizeInventory()];
@@ -150,7 +151,8 @@ public class TileTransvectorInterface extends TileTransvector implements ISidedI
     }
 
     private void fillThaumatorium(TileThaumatorium thaumatorium) {
-        if (!this.worldObj.isRemote && thaumatorium.currentSuction != null) {
+        ++this.thaumatoriumCount;
+        if (!this.worldObj.isRemote && !thaumatorium.gettingPower() && this.thaumatoriumCount % 5 == 0 && thaumatorium.recipeHash != null && thaumatorium.recipeHash.size() > 0 && thaumatorium.currentSuction != null) {
             TileEntity te = null;
             IEssentiaTransport ic = null;
 
