@@ -30,16 +30,20 @@ import net.minecraft.inventory.IInventory;
 import net.minecraft.inventory.ISidedInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
-import net.minecraft.world.World;
 import net.minecraftforge.common.util.ForgeDirection;
 import net.minecraftforge.fluids.Fluid;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidTankInfo;
 import net.minecraftforge.fluids.IFluidHandler;
+import thaumcraft.api.ThaumcraftApiHelper;
 import thaumcraft.api.aspects.Aspect;
 import thaumcraft.api.aspects.AspectList;
 import thaumcraft.api.aspects.IAspectContainer;
 import thaumcraft.api.aspects.IEssentiaTransport;
+import thaumcraft.common.tiles.TileEssentiaReservoir;
+import thaumcraft.common.tiles.TileJarFillable;
+import thaumcraft.common.tiles.TileThaumatorium;
+import thaumcraft.common.tiles.TileThaumatoriumTop;
 import thaumic.tinkerer.common.compat.IndustrialcraftUnloadHelper;
 import thaumic.tinkerer.common.lib.LibFeatures;
 
@@ -55,6 +59,8 @@ import thaumic.tinkerer.common.lib.LibFeatures;
 public class TileTransvectorInterface extends TileTransvector implements ISidedInventory, IEnergyEmitter,IEnergySink,IEnergyConductor,IEnergySource, IFluidHandler, IEnergyHandler, IEnergyReceiver, IAspectContainer, IEssentiaTransport, IPeripheral,IEnergyProvider {
 
     public boolean addedToICEnergyNet = false;
+    private int jarCount = 0;
+    private int reservoirCount = 0;
 
     public static int[] buildSlotsForLinearInventory(IInventory inv) {
         int[] slots = new int[inv.getSizeInventory()];
@@ -73,6 +79,96 @@ public class TileTransvectorInterface extends TileTransvector implements ISidedI
 
             IndustrialcraftUnloadHelper.addToIC2EnergyNet(this);
             addedToICEnergyNet = true;
+        }
+        TileEntity tile = getTile();
+        if (tile instanceof IEssentiaTransport) {
+            drawEssentia(tile);
+        }
+    }
+
+    // Essentia input is hardcoded, so these need to be accounted for manually.
+    private void drawEssentia(TileEntity tile) {
+        if (tile instanceof TileEssentiaReservoir) {
+            fillReservoir((TileEssentiaReservoir) tile);
+        }
+        else if (tile instanceof TileJarFillable) {
+            fillJar((TileJarFillable) tile);
+        }
+        else if (tile instanceof TileThaumatorium) {
+            fillThaumatorium((TileThaumatorium) tile);
+        }
+        else if (tile instanceof TileThaumatoriumTop) {
+            fillThaumatorium(((TileThaumatoriumTop) tile).thaumatorium);
+        }
+    }
+
+    private void fillReservoir(TileEssentiaReservoir reservoir) {
+        ++this.reservoirCount;
+        if(!this.worldObj.isRemote && this.reservoirCount % 5 == 0 && reservoir.essentia.visSize() < reservoir.maxAmount) {
+            TileEntity te = ThaumcraftApiHelper.getConnectableTile(this.worldObj, this.xCoord, this.yCoord, this.zCoord, reservoir.facing);
+            if(te != null) {
+                IEssentiaTransport ic = (IEssentiaTransport)te;
+                if(!ic.canOutputTo(reservoir.facing.getOpposite())) {
+                    return;
+                }
+
+                Aspect ta = null;
+                if(ic.getEssentiaAmount(reservoir.facing.getOpposite()) > 0 && ic.getSuctionAmount(reservoir.facing.getOpposite()) < this.getSuctionAmount(reservoir.facing) && this.getSuctionAmount(reservoir.facing) >= ic.getMinimumSuction()) {
+                    ta = ic.getEssentiaType(reservoir.facing.getOpposite());
+                }
+
+                if(ta != null && ic.getSuctionAmount(reservoir.facing.getOpposite()) < this.getSuctionAmount(reservoir.facing)) {
+                    this.addToContainer(ta, ic.takeEssentia(ta, 1, reservoir.facing.getOpposite()));
+                }
+            }
+        }
+    }
+
+    private void fillJar(TileJarFillable jar) {
+        if (!this.worldObj.isRemote && ++this.jarCount % 5 == 0 && jar.amount < jar.maxAmount) {
+            TileEntity te = ThaumcraftApiHelper.getConnectableTile(this.worldObj, this.xCoord, this.yCoord, this.zCoord, ForgeDirection.UP);
+            if(te != null) {
+                IEssentiaTransport ic = (IEssentiaTransport)te;
+                if(!ic.canOutputTo(ForgeDirection.DOWN)) {
+                    return;
+                }
+
+                Aspect ta = null;
+                if(jar.aspectFilter != null) {
+                    ta = jar.aspectFilter;
+                } else if(jar.aspect != null && jar.amount > 0) {
+                    ta = jar.aspect;
+                } else if(ic.getEssentiaAmount(ForgeDirection.DOWN) > 0 && ic.getSuctionAmount(ForgeDirection.DOWN) < this.getSuctionAmount(ForgeDirection.UP) && this.getSuctionAmount(ForgeDirection.UP) >= ic.getMinimumSuction()) {
+                    ta = ic.getEssentiaType(ForgeDirection.DOWN);
+                }
+
+                if(ta != null && ic.getSuctionAmount(ForgeDirection.DOWN) < this.getSuctionAmount(ForgeDirection.UP)) {
+                    this.addToContainer(ta, ic.takeEssentia(ta, 1, ForgeDirection.DOWN));
+                }
+            }
+        }
+    }
+
+    private void fillThaumatorium(TileThaumatorium thaumatorium) {
+        if (!this.worldObj.isRemote && thaumatorium.currentSuction != null) {
+            TileEntity te = null;
+            IEssentiaTransport ic = null;
+
+            for (ForgeDirection dir : ForgeDirection.VALID_DIRECTIONS) {
+                if (dir != thaumatorium.facing && dir != ForgeDirection.DOWN) {
+                    te = ThaumcraftApiHelper.getConnectableTile(this.worldObj, this.xCoord, this.yCoord, this.zCoord, dir);
+                    if (te != null) {
+                        ic = (IEssentiaTransport) te;
+                        if (ic.getEssentiaAmount(dir.getOpposite()) > 0 && ic.getSuctionAmount(dir.getOpposite()) < this.getSuctionAmount((ForgeDirection) null) && this.getSuctionAmount((ForgeDirection) null) >= ic.getMinimumSuction()) {
+                            int ess = ic.takeEssentia(thaumatorium.currentSuction, 1, dir.getOpposite());
+                            if (ess > 0) {
+                                this.addToContainer(thaumatorium.currentSuction, ess);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -354,9 +450,9 @@ public class TileTransvectorInterface extends TileTransvector implements ISidedI
 
     @Override
     public boolean isConnectable(ForgeDirection forgeDirection) {
-        //TileEntity tile = getTile();
-        //return tile instanceof IEssentiaTransport && ((IEssentiaTransport) tile).isConnectable(forgeDirection);
-    	return true;
+        TileEntity tile = getTile();
+        return tile instanceof IEssentiaTransport && ((IEssentiaTransport) tile).isConnectable(forgeDirection);
+//    	return true;
     }
 
     @Override
